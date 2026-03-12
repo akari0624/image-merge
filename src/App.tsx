@@ -1,6 +1,5 @@
 import { useState, useRef, useCallback } from "react";
 import * as pdfjsLib from "pdfjs-dist";
-import "pdfjs-dist/build/pdf.worker.min.mjs";
 import { jsPDF } from "jspdf";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -19,6 +18,95 @@ interface ImageItem {
 
 type OutputFormat = "png" | "jpeg";
 
+const loadImage = (file: File, label?: string): Promise<ImageItem> => {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      resolve({
+        id: crypto.randomUUID(),
+        file,
+        url,
+        width: img.naturalWidth,
+        height: img.naturalHeight,
+        label: label ?? file.name,
+      });
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error(`Failed to load image: ${file.name}`));
+    };
+    img.src = url;
+  });
+};
+
+const pdfToImages = async (file: File): Promise<ImageItem[]> => {
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const items: ImageItem[] = [];
+
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const scale = 2;
+    const viewport = page.getViewport({ scale });
+    const canvas = document.createElement("canvas");
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    await page.render({ canvas, viewport }).promise;
+
+    const blob = await new Promise<Blob>((resolve) =>
+      canvas.toBlob((b) => resolve(b!), "image/png"),
+    );
+    const imgFile = new File([blob], `${file.name}-page${i}.png`, {
+      type: "image/png",
+    });
+    const item = await loadImage(
+      imgFile,
+      `${file.name} (p.${i}/${pdf.numPages})`,
+    );
+    items.push(item);
+  }
+
+  return items;
+};
+
+const drawImageHighQuality = (
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  targetWidth: number,
+  targetHeight: number,
+  destY: number,
+) => {
+  if (targetWidth >= img.naturalWidth * 0.5) {
+    ctx.drawImage(img, 0, destY, targetWidth, targetHeight);
+    return;
+  }
+
+  const steps: HTMLCanvasElement[] = [];
+  let sw = img.naturalWidth;
+  let sh = img.naturalHeight;
+
+  const first = document.createElement("canvas");
+  first.width = sw;
+  first.height = sh;
+  const fCtx = first.getContext("2d")!;
+  fCtx.drawImage(img, 0, 0);
+  steps.push(first);
+
+  while (sw * 0.5 > targetWidth) {
+    sw = Math.round(sw * 0.5);
+    sh = Math.round(sh * 0.5);
+    const step = document.createElement("canvas");
+    step.width = sw;
+    step.height = sh;
+    const sCtx = step.getContext("2d")!;
+    sCtx.drawImage(steps[steps.length - 1], 0, 0, sw, sh);
+    steps.push(step);
+  }
+
+  ctx.drawImage(steps[steps.length - 1], 0, destY, targetWidth, targetHeight);
+};
+
 function App() {
   const [images, setImages] = useState<ImageItem[]>([]);
   const [quality, setQuality] = useState(0.85);
@@ -32,58 +120,6 @@ function App() {
   const [isDragOver, setIsDragOver] = useState(false);
   const dragItemRef = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const loadImage = (file: File, label?: string): Promise<ImageItem> => {
-    return new Promise((resolve, reject) => {
-      const url = URL.createObjectURL(file);
-      const img = new Image();
-      img.onload = () => {
-        resolve({
-          id: crypto.randomUUID(),
-          file,
-          url,
-          width: img.naturalWidth,
-          height: img.naturalHeight,
-          label: label ?? file.name,
-        });
-      };
-      img.onerror = () => {
-        URL.revokeObjectURL(url);
-        reject(new Error(`Failed to load image: ${file.name}`));
-      };
-      img.src = url;
-    });
-  };
-
-  const pdfToImages = async (file: File): Promise<ImageItem[]> => {
-    const arrayBuffer = await file.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-    const items: ImageItem[] = [];
-
-    for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i);
-      const scale = 2;
-      const viewport = page.getViewport({ scale });
-      const canvas = document.createElement("canvas");
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
-      await page.render({ canvas, viewport }).promise;
-
-      const blob = await new Promise<Blob>((resolve) =>
-        canvas.toBlob((b) => resolve(b!), "image/png"),
-      );
-      const imgFile = new File([blob], `${file.name}-page${i}.png`, {
-        type: "image/png",
-      });
-      const item = await loadImage(
-        imgFile,
-        `${file.name} (p.${i}/${pdf.numPages})`,
-      );
-      items.push(item);
-    }
-
-    return items;
-  };
 
   const processFiles = async (files: FileList) => {
     setIsProcessing(true);
@@ -150,43 +186,6 @@ function App() {
   const handleDragEnd = () => {
     dragItemRef.current = null;
     setDragOverIndex(null);
-  };
-
-  const drawImageHighQuality = (
-    ctx: CanvasRenderingContext2D,
-    img: HTMLImageElement,
-    targetWidth: number,
-    targetHeight: number,
-    destY: number,
-  ) => {
-    if (targetWidth >= img.naturalWidth * 0.5) {
-      ctx.drawImage(img, 0, destY, targetWidth, targetHeight);
-      return;
-    }
-
-    const steps: HTMLCanvasElement[] = [];
-    let sw = img.naturalWidth;
-    let sh = img.naturalHeight;
-
-    const first = document.createElement("canvas");
-    first.width = sw;
-    first.height = sh;
-    const fCtx = first.getContext("2d")!;
-    fCtx.drawImage(img, 0, 0);
-    steps.push(first);
-
-    while (sw * 0.5 > targetWidth) {
-      sw = Math.round(sw * 0.5);
-      sh = Math.round(sh * 0.5);
-      const step = document.createElement("canvas");
-      step.width = sw;
-      step.height = sh;
-      const sCtx = step.getContext("2d")!;
-      sCtx.drawImage(steps[steps.length - 1], 0, 0, sw, sh);
-      steps.push(step);
-    }
-
-    ctx.drawImage(steps[steps.length - 1], 0, destY, targetWidth, targetHeight);
   };
 
   const mergeImages = useCallback(async () => {
