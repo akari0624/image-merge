@@ -1,22 +1,14 @@
 import { useState, useRef, useCallback } from "react";
 import * as pdfjsLib from "pdfjs-dist";
 import { jsPDF } from "jspdf";
+import type { ImageItem, OutputFormat } from "./types";
+import { formatBytes } from "./utils/format-bytes";
+import { ImageList } from "./components/ImageList";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.min.mjs",
   import.meta.url,
 ).href;
-
-interface ImageItem {
-  id: string;
-  file: File;
-  url: string;
-  width: number;
-  height: number;
-  label: string;
-}
-
-type OutputFormat = "png" | "jpeg";
 
 const loadImage = (file: File, label?: string): Promise<ImageItem> => {
   return new Promise((resolve, reject) => {
@@ -116,9 +108,7 @@ function App() {
   const [isMerging, setIsMerging] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
-  const dragItemRef = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const processFiles = async (files: FileList) => {
@@ -158,34 +148,14 @@ function App() {
     setMergedUrl(null);
   };
 
-  const handleDragStart = (index: number) => {
-    dragItemRef.current = index;
-  };
-
-  const handleDragOver = (e: React.DragEvent, index: number) => {
-    e.preventDefault();
-    setDragOverIndex(index);
-  };
-
-  const handleDrop = (index: number) => {
-    const from = dragItemRef.current;
-    if (from === null || from === index) {
-      setDragOverIndex(null);
-      return;
-    }
+  const reorderImages = (from: number, to: number) => {
     setImages((prev) => {
       const next = [...prev];
       const [moved] = next.splice(from, 1);
-      next.splice(index, 0, moved);
+      next.splice(to, 0, moved);
       return next;
     });
-    setDragOverIndex(null);
     setMergedUrl(null);
-  };
-
-  const handleDragEnd = () => {
-    dragItemRef.current = null;
-    setDragOverIndex(null);
   };
 
   const mergeImages = useCallback(async () => {
@@ -315,14 +285,6 @@ function App() {
     }
   }, [images, quality]);
 
-  const formatBytes = (bytes: number) => {
-    if (bytes === 0) return "0 B";
-    const k = 1024;
-    const sizes = ["B", "KB", "MB", "GB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
-  };
-
   return (
     <div className="max-w-180 mx-auto py-8 px-4 font-sans">
       <h1 className="text-3xl font-bold mb-1">Image Merge Tool</h1>
@@ -386,46 +348,11 @@ function App() {
         />
       </div>
 
-      {/* Image list */}
-      {images.length > 0 && (
-        <div className="mt-6 flex flex-col gap-2">
-          {images.map((item, index) => (
-            <div
-              key={item.id}
-              className={`flex items-center gap-3 px-3 py-2 border rounded-lg cursor-grab active:cursor-grabbing transition-colors
-                ${dragOverIndex === index ? "border-brand bg-brand/10" : "border-border-dark dark:border-border-dark light:border-border-light"}`}
-              draggable
-              onDragStart={() => handleDragStart(index)}
-              onDragOver={(e) => handleDragOver(e, index)}
-              onDrop={() => handleDrop(index)}
-              onDragEnd={handleDragEnd}
-            >
-              <span className="text-xs text-gray-500 min-w-6 text-center">
-                {index + 1}
-              </span>
-              <img
-                src={item.url}
-                alt={item.label}
-                className="w-14 h-14 object-cover rounded-md shrink-0"
-              />
-              <div className="flex-1 min-w-0">
-                <div className="text-sm truncate">{item.label}</div>
-                <div className="text-xs text-gray-400 mt-0.5">
-                  {item.width} x {item.height} &middot;{" "}
-                  {formatBytes(item.file.size)}
-                </div>
-              </div>
-              <button
-                className="bg-transparent border-none text-xl text-gray-400 cursor-pointer px-2 py-1 leading-none rounded hover:text-remove hover:bg-remove/10"
-                onClick={() => removeImage(item.id)}
-                title="Remove"
-              >
-                &times;
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
+      <ImageList
+        images={images}
+        onReorder={reorderImages}
+        onRemove={removeImage}
+      />
 
       {/* Controls */}
       {images.length > 0 && (
