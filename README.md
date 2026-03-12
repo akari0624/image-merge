@@ -1,75 +1,52 @@
-# React + TypeScript + Vite
+# Image Merge Tool
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A browser-based tool for uploading multiple images (and PDFs), reordering them via drag & drop, and merging them into a single vertically-stacked image or PDF.
 
-Currently, two official plugins are available:
+Built with React + TypeScript + Vite + Tailwind CSS v4. This project was bootstrapped from the [Vite `react-ts` template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts).
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## Development
 
-## React Compiler
-
-The React Compiler is enabled on this template. See [this documentation](https://react.dev/learn/react-compiler) for more information.
-
-Note: This will impact Vite dev & build performances.
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+pnpm install
+pnpm dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Build
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+pnpm build
 ```
+
+## CI/CD: GitHub Pages Deployment
+
+This project uses **GitHub Actions** to deploy to GitHub Pages — no `gh-pages` branch or third-party deploy packages needed.
+
+### How it works
+
+1. **Vite `base` path** (`vite.config.ts`): When running in GitHub Actions, `base` is automatically set to `'/image-merge/'` (the repo name) so asset paths resolve correctly under `https://<user>.github.io/image-merge/`. Local dev remains `/`.
+
+2. **GitHub Actions workflow** (`.github/workflows/deploy.yml`): On every push to `master`, the workflow runs `pnpm build`, uploads the `dist/` folder as a Pages artifact, and deploys it directly — no intermediate branch involved.
+
+### Why not `gh-pages` package?
+
+The `gh-pages` npm package works by force-pushing build output to a `gh-pages` branch. This was the standard approach before GitHub introduced the `actions/deploy-pages` action in 2022.
+
+The newer approach (used here) deploys directly from workflow artifacts, which:
+
+- Avoids polluting the repo with a force-pushed deploy branch
+- Requires only `pages: write` permission (no repo write access)
+- Provides atomic deployments from build artifacts
+
+### Setup steps
+
+1. Create a GitHub repo named `image-merge`
+2. Add the remote and push:
+   ```bash
+   git remote add origin git@github.com:<your-username>/image-merge.git
+   git push -u origin master
+   ```
+3. Go to repo **Settings > Pages > Source** and select **GitHub Actions**
+4. The workflow will run automatically on push. Once complete, the site is live at:
+   ```
+   https://<your-username>.github.io/image-merge/
+   ```
