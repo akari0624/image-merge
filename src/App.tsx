@@ -1,5 +1,13 @@
 import { useState, useRef, useCallback } from "react";
+import * as pdfjsLib from "pdfjs-dist";
+import "pdfjs-dist/build/pdf.worker.min.mjs";
+import { jsPDF } from "jspdf";
 import "./App.css";
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+  "pdfjs-dist/build/pdf.worker.min.mjs",
+  import.meta.url
+).href;
 
 interface ImageItem {
   id: string;
@@ -7,6 +15,7 @@ interface ImageItem {
   url: string;
   width: number;
   height: number;
+  label: string;
 }
 
 type OutputFormat = "png" | "jpeg";
@@ -18,11 +27,13 @@ function App() {
   const [mergedUrl, setMergedUrl] = useState<string | null>(null);
   const [mergedSize, setMergedSize] = useState<number>(0);
   const [isMerging, setIsMerging] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const dragItemRef = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const loadImage = (file: File): Promise<ImageItem> => {
+  const loadImage = (file: File, label?: string): Promise<ImageItem> => {
     return new Promise((resolve, reject) => {
       const url = URL.createObjectURL(file);
       const img = new Image();
@@ -33,6 +44,7 @@ function App() {
           url,
           width: img.naturalWidth,
           height: img.naturalHeight,
+          label: label ?? file.name,
         });
       };
       img.onerror = () => {
@@ -43,14 +55,62 @@ function App() {
     });
   };
 
+  const pdfToImages = async (file: File): Promise<ImageItem[]> => {
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    const items: ImageItem[] = [];
+
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      // Render at 2x scale for sharp output
+      const scale = 2;
+      const viewport = page.getViewport({ scale });
+      const canvas = document.createElement("canvas");
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      await page.render({ canvas, viewport }).promise;
+
+      const blob = await new Promise<Blob>((resolve) =>
+        canvas.toBlob((b) => resolve(b!), "image/png")
+      );
+      const imgFile = new File([blob], `${file.name}-page${i}.png`, {
+        type: "image/png",
+      });
+      const item = await loadImage(
+        imgFile,
+        `${file.name} (p.${i}/${pdf.numPages})`
+      );
+      items.push(item);
+    }
+
+    return items;
+  };
+
+  const processFiles = async (files: FileList) => {
+    setIsProcessing(true);
+    try {
+      const allItems: ImageItem[] = [];
+      for (const file of Array.from(files)) {
+        if (file.type === "application/pdf") {
+          const pdfItems = await pdfToImages(file);
+          allItems.push(...pdfItems);
+        } else if (file.type.startsWith("image/")) {
+          allItems.push(await loadImage(file));
+        }
+      }
+      if (allItems.length > 0) {
+        setImages((prev) => [...prev, ...allItems]);
+        setMergedUrl(null);
+      }
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
-    if (!files) return;
-    const newImages = await Promise.all(
-      Array.from(files).map((f) => loadImage(f))
-    );
-    setImages((prev) => [...prev, ...newImages]);
-    setMergedUrl(null);
+    if (!files || files.length === 0) return;
+    await processFiles(files);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
@@ -214,6 +274,65 @@ function App() {
     a.click();
   };
 
+  const exportAsPdf = useCallback(async () => {
+    if (images.length === 0) return;
+    setIsExporting(true);
+
+    try {
+      // Load all images as HTMLImageElement
+      const loadedImgs = await Promise.all(
+        images.map(
+          (item) =>
+            new Promise<HTMLImageElement>((resolve, reject) => {
+              const img = new Image();
+              img.onload = () => resolve(img);
+              img.onerror = reject;
+              img.src = item.url;
+            })
+        )
+      );
+
+      // Use first image dimensions to determine PDF page size
+      const firstImg = images[0];
+      const pdfWidth = firstImg.width;
+      const pdfHeight = firstImg.height;
+      const orientation = pdfWidth > pdfHeight ? "landscape" : "portrait";
+
+      const pdf = new jsPDF({
+        orientation,
+        unit: "px",
+        format: [pdfWidth, pdfHeight],
+        hotfixes: ["px_scaling"],
+      });
+
+      for (let i = 0; i < loadedImgs.length; i++) {
+        if (i > 0) {
+          const w = images[i].width;
+          const h = images[i].height;
+          pdf.addPage([w, h], w > h ? "landscape" : "portrait");
+        }
+
+        const img = loadedImgs[i];
+        const { width, height } = images[i];
+
+        // Render image to a canvas at original size, then export as JPEG
+        // with the user-controlled quality to manage file size
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d")!;
+        ctx.drawImage(img, 0, 0, width, height);
+
+        const dataUrl = canvas.toDataURL("image/jpeg", quality);
+        pdf.addImage(dataUrl, "JPEG", 0, 0, width, height);
+      }
+
+      pdf.save("merged-images.pdf");
+    } finally {
+      setIsExporting(false);
+    }
+  }, [images, quality]);
+
   const formatBytes = (bytes: number) => {
     if (bytes === 0) return "0 B";
     const k = 1024;
@@ -231,8 +350,8 @@ function App() {
 
       {/* Upload area */}
       <div
-        className="upload-area"
-        onClick={() => fileInputRef.current?.click()}
+        className={`upload-area ${isProcessing ? "processing" : ""}`}
+        onClick={() => !isProcessing && fileInputRef.current?.click()}
         onDragOver={(e) => {
           e.preventDefault();
           e.currentTarget.classList.add("dragover");
@@ -243,28 +362,38 @@ function App() {
         onDrop={(e) => {
           e.preventDefault();
           e.currentTarget.classList.remove("dragover");
+          if (isProcessing) return;
           const files = e.dataTransfer.files;
           if (files.length) {
             const dt = new DataTransfer();
             Array.from(files).forEach((f) => {
-              if (f.type.startsWith("image/")) dt.items.add(f);
+              if (f.type.startsWith("image/") || f.type === "application/pdf")
+                dt.items.add(f);
             });
-            if (dt.files.length && fileInputRef.current) {
-              fileInputRef.current.files = dt.files;
-              fileInputRef.current.dispatchEvent(
-                new Event("change", { bubbles: true })
-              );
+            if (dt.files.length) {
+              processFiles(dt.files);
             }
           }
         }}
       >
-        <div className="upload-icon">+</div>
-        <div>Click or drag images here to upload</div>
-        <div className="upload-hint">Supports PNG, JPG, WebP, etc.</div>
+        {isProcessing ? (
+          <>
+            <div className="upload-icon spinning">&#8635;</div>
+            <div>Processing PDF...</div>
+          </>
+        ) : (
+          <>
+            <div className="upload-icon">+</div>
+            <div>Click or drag files here to upload</div>
+            <div className="upload-hint">
+              Supports PNG, JPG, WebP, PDF, etc.
+            </div>
+          </>
+        )}
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/*"
+          accept="image/*,.pdf,application/pdf"
           multiple
           onChange={handleFileChange}
           hidden
@@ -285,9 +414,9 @@ function App() {
               onDragEnd={handleDragEnd}
             >
               <span className="image-index">{index + 1}</span>
-              <img src={item.url} alt={item.file.name} className="thumbnail" />
+              <img src={item.url} alt={item.label} className="thumbnail" />
               <div className="image-info">
-                <div className="image-name">{item.file.name}</div>
+                <div className="image-name">{item.label}</div>
                 <div className="image-meta">
                   {item.width} x {item.height} &middot;{" "}
                   {formatBytes(item.file.size)}
@@ -365,6 +494,13 @@ function App() {
             disabled={isMerging}
           >
             {isMerging ? "Merging..." : "Merge Images"}
+          </button>
+          <button
+            className="export-pdf-btn"
+            onClick={exportAsPdf}
+            disabled={isExporting}
+          >
+            {isExporting ? "Exporting..." : "Export as PDF"}
           </button>
         </div>
       )}
