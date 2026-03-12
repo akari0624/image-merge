@@ -320,18 +320,27 @@ const drawImageHighQuality = (
   ctx.drawImage(steps[steps.length - 1], 0, destY, targetWidth, targetHeight);
 };
 
+type BusyState = "idle" | "processing" | "merging" | "exporting";
+
+interface MergedImage {
+  url: string;
+  size: number;
+}
+
 function App() {
   const [images, setImages] = useState<ImageItem[]>([]);
   const [quality, setQuality] = useState(0.85);
   const [format, setFormat] = useState<OutputFormat>("jpeg");
-  const [mergedUrl, setMergedUrl] = useState<string | null>(null);
-  const [mergedSize, setMergedSize] = useState<number>(0);
-  const [isMerging, setIsMerging] = useState(false);
-  const [isExporting, setIsExporting] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [merged, setMerged] = useState<MergedImage | null>(null);
+  const [busy, setBusy] = useState<BusyState>("idle");
+
+  const clearMerged = () => {
+    if (merged) URL.revokeObjectURL(merged.url);
+    setMerged(null);
+  };
 
   const processFiles = async (files: FileList) => {
-    setIsProcessing(true);
+    setBusy("processing");
     try {
       const allItems: ImageItem[] = [];
       for (const file of Array.from(files)) {
@@ -344,10 +353,10 @@ function App() {
       }
       if (allItems.length > 0) {
         setImages((prev) => [...prev, ...allItems]);
-        setMergedUrl(null);
+        clearMerged();
       }
     } finally {
-      setIsProcessing(false);
+      setBusy("idle");
     }
   };
 
@@ -357,7 +366,7 @@ function App() {
       if (item) URL.revokeObjectURL(item.url);
       return prev.filter((i) => i.id !== id);
     });
-    setMergedUrl(null);
+    clearMerged();
   };
 
   const reorderImages = (from: number, to: number) => {
@@ -367,12 +376,12 @@ function App() {
       next.splice(to, 0, moved);
       return next;
     });
-    setMergedUrl(null);
+    clearMerged();
   };
 
   const mergeImages = useCallback(async () => {
     if (images.length === 0) return;
-    setIsMerging(true);
+    setBusy("merging");
 
     try {
       const loadedImgs = await Promise.all(
@@ -425,26 +434,25 @@ function App() {
         );
       });
 
-      if (mergedUrl) URL.revokeObjectURL(mergedUrl);
+      clearMerged();
       const url = URL.createObjectURL(blob);
-      setMergedUrl(url);
-      setMergedSize(blob.size);
+      setMerged({ url, size: blob.size });
     } finally {
-      setIsMerging(false);
+      setBusy("idle");
     }
-  }, [images, quality, format, mergedUrl]);
+  }, [images, quality, format, merged]);
 
   const downloadImage = () => {
-    if (!mergedUrl) return;
+    if (!merged) return;
     const a = document.createElement("a");
-    a.href = mergedUrl;
+    a.href = merged.url;
     a.download = `merged-image.${format === "jpeg" ? "jpg" : "png"}`;
     a.click();
   };
 
   const exportAsPdf = useCallback(async () => {
     if (images.length === 0) return;
-    setIsExporting(true);
+    setBusy("exporting");
 
     try {
       const loadedImgs = await Promise.all(
@@ -493,7 +501,7 @@ function App() {
 
       pdf.save("merged-images.pdf");
     } finally {
-      setIsExporting(false);
+      setBusy("idle");
     }
   }, [images, quality]);
 
@@ -505,7 +513,10 @@ function App() {
         download.
       </p>
 
-      <UploadArea isProcessing={isProcessing} onFiles={processFiles} />
+      <UploadArea
+        isProcessing={busy === "processing"}
+        onFiles={processFiles}
+      />
 
       {images.length > 0 && (
         <ImageList
@@ -519,25 +530,25 @@ function App() {
         <ControlPanel
           format={format}
           quality={quality}
-          isMerging={isMerging}
-          isExporting={isExporting}
+          isMerging={busy === "merging"}
+          isExporting={busy === "exporting"}
           onFormatChange={(f) => {
             setFormat(f);
-            setMergedUrl(null);
+            clearMerged();
           }}
           onQualityChange={(q) => {
             setQuality(q);
-            setMergedUrl(null);
+            clearMerged();
           }}
           onMerge={mergeImages}
           onExportPdf={exportAsPdf}
         />
       )}
 
-      {mergedUrl && (
+      {merged && (
         <MergeResult
-          url={mergedUrl}
-          size={mergedSize}
+          url={merged.url}
+          size={merged.size}
           format={format}
           onDownload={downloadImage}
         />
