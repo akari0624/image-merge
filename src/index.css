@@ -1,31 +1,37 @@
-:root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
+@import "tailwindcss";
 
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
-
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+@theme {
+  --color-brand: #646cff;
+  --color-brand-hover: #535bf2;
+  --color-danger: #e74c3c;
+  --color-danger-hover: #c0392b;
+  --color-success: #52c41a;
+  --color-success-hover: #45a816;
+  --color-remove: #ff4d4f;
+  --color-border-dark: #333;
+  --color-border-light: #ddd;
 }
 
-* {
-  box-sizing: border-box;
-}
-
-body {
-  margin: 0;
-  min-width: 320px;
-  min-height: 100vh;
-}
-
-@media (prefers-color-scheme: light) {
+@layer base {
   :root {
-    color: #213547;
-    background-color: #ffffff;
+    color-scheme: light dark;
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
+
+  body {
+    @apply m-0 min-w-[320px] min-h-screen bg-[#242424] text-white/87 dark:bg-[#242424] dark:text-white/87;
+  }
+
+  @media (prefers-color-scheme: light) {
+    body {
+      @apply bg-white text-[#213547];
+    }
+  }
+}
+
+@utility animate-spin-slow {
+  animation: spin 1s linear infinite;
 }

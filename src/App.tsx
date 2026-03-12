@@ -2,11 +2,10 @@ import { useState, useRef, useCallback } from "react";
 import * as pdfjsLib from "pdfjs-dist";
 import "pdfjs-dist/build/pdf.worker.min.mjs";
 import { jsPDF } from "jspdf";
-import "./App.css";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.min.mjs",
-  import.meta.url
+  import.meta.url,
 ).href;
 
 interface ImageItem {
@@ -30,6 +29,7 @@ function App() {
   const [isExporting, setIsExporting] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
   const dragItemRef = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -62,7 +62,6 @@ function App() {
 
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);
-      // Render at 2x scale for sharp output
       const scale = 2;
       const viewport = page.getViewport({ scale });
       const canvas = document.createElement("canvas");
@@ -71,14 +70,14 @@ function App() {
       await page.render({ canvas, viewport }).promise;
 
       const blob = await new Promise<Blob>((resolve) =>
-        canvas.toBlob((b) => resolve(b!), "image/png")
+        canvas.toBlob((b) => resolve(b!), "image/png"),
       );
       const imgFile = new File([blob], `${file.name}-page${i}.png`, {
         type: "image/png",
       });
       const item = await loadImage(
         imgFile,
-        `${file.name} (p.${i}/${pdf.numPages})`
+        `${file.name} (p.${i}/${pdf.numPages})`,
       );
       items.push(item);
     }
@@ -153,28 +152,22 @@ function App() {
     setDragOverIndex(null);
   };
 
-  // Use multi-step downscaling (like Lanczos approximation) for better quality
-  // when reducing image dimensions. This avoids the blurry result of a single
-  // large-ratio drawImage call by halving dimensions iteratively.
   const drawImageHighQuality = (
     ctx: CanvasRenderingContext2D,
     img: HTMLImageElement,
     targetWidth: number,
     targetHeight: number,
-    destY: number
+    destY: number,
   ) => {
-    // If upscaling or ratio close to 1, just draw directly
     if (targetWidth >= img.naturalWidth * 0.5) {
       ctx.drawImage(img, 0, destY, targetWidth, targetHeight);
       return;
     }
 
-    // Step-down approach: halve dimensions until close to target
     const steps: HTMLCanvasElement[] = [];
     let sw = img.naturalWidth;
     let sh = img.naturalHeight;
 
-    // Create first step canvas from original image
     const first = document.createElement("canvas");
     first.width = sw;
     first.height = sh;
@@ -193,7 +186,6 @@ function App() {
       steps.push(step);
     }
 
-    // Final draw to destination
     ctx.drawImage(steps[steps.length - 1], 0, destY, targetWidth, targetHeight);
   };
 
@@ -202,7 +194,6 @@ function App() {
     setIsMerging(true);
 
     try {
-      // Load all images as HTMLImageElement
       const loadedImgs = await Promise.all(
         images.map(
           (item) =>
@@ -211,11 +202,10 @@ function App() {
               img.onload = () => resolve(img);
               img.onerror = reject;
               img.src = item.url;
-            })
-        )
+            }),
+        ),
       );
 
-      // Calculate canvas dimensions - use the widest image as the base width
       const maxWidth = Math.max(...images.map((i) => i.width));
       const totalHeight = images.reduce((sum, img) => {
         const scale = maxWidth / img.width;
@@ -227,7 +217,6 @@ function App() {
       canvas.height = Math.round(totalHeight);
       const ctx = canvas.getContext("2d")!;
 
-      // Fill background white for JPEG (no transparency)
       if (format === "jpeg") {
         ctx.fillStyle = "#ffffff";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -236,7 +225,6 @@ function App() {
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = "high";
 
-      // Draw each image vertically
       let y = 0;
       for (let i = 0; i < loadedImgs.length; i++) {
         const img = loadedImgs[i];
@@ -247,13 +235,12 @@ function App() {
         y += scaledHeight;
       }
 
-      // Convert to blob
       const mimeType = format === "png" ? "image/png" : "image/jpeg";
       const blob = await new Promise<Blob>((resolve) => {
         canvas.toBlob(
           (b) => resolve(b!),
           mimeType,
-          format === "jpeg" ? quality : undefined
+          format === "jpeg" ? quality : undefined,
         );
       });
 
@@ -279,7 +266,6 @@ function App() {
     setIsExporting(true);
 
     try {
-      // Load all images as HTMLImageElement
       const loadedImgs = await Promise.all(
         images.map(
           (item) =>
@@ -288,11 +274,10 @@ function App() {
               img.onload = () => resolve(img);
               img.onerror = reject;
               img.src = item.url;
-            })
-        )
+            }),
+        ),
       );
 
-      // Use first image dimensions to determine PDF page size
       const firstImg = images[0];
       const pdfWidth = firstImg.width;
       const pdfHeight = firstImg.height;
@@ -315,8 +300,6 @@ function App() {
         const img = loadedImgs[i];
         const { width, height } = images[i];
 
-        // Render image to a canvas at original size, then export as JPEG
-        // with the user-controlled quality to manage file size
         const canvas = document.createElement("canvas");
         canvas.width = width;
         canvas.height = height;
@@ -342,26 +325,28 @@ function App() {
   };
 
   return (
-    <div className="app">
-      <h1>Image Merge Tool</h1>
-      <p className="subtitle">
-        Upload images, reorder by drag & drop, merge vertically and download.
+    <div className="max-w-180 mx-auto py-8 px-4 font-sans">
+      <h1 className="text-3xl font-bold mb-1">Image Merge Tool</h1>
+      <p className="text-gray-400 mb-6">
+        Upload images, reorder by drag &amp; drop, merge vertically and
+        download.
       </p>
 
       {/* Upload area */}
       <div
-        className={`upload-area ${isProcessing ? "processing" : ""}`}
+        className={`border-2 border-dashed rounded-xl py-10 px-4 text-center cursor-pointer select-none transition-colors
+          ${isDragOver ? "border-brand bg-brand/5" : "border-gray-600 dark:border-gray-600 light:border-gray-300"}
+          ${!isDragOver && !isProcessing ? "hover:border-brand hover:bg-brand/5" : ""}
+          ${isProcessing ? "pointer-events-none opacity-70" : ""}`}
         onClick={() => !isProcessing && fileInputRef.current?.click()}
         onDragOver={(e) => {
           e.preventDefault();
-          e.currentTarget.classList.add("dragover");
+          setIsDragOver(true);
         }}
-        onDragLeave={(e) => {
-          e.currentTarget.classList.remove("dragover");
-        }}
+        onDragLeave={() => setIsDragOver(false)}
         onDrop={(e) => {
           e.preventDefault();
-          e.currentTarget.classList.remove("dragover");
+          setIsDragOver(false);
           if (isProcessing) return;
           const files = e.dataTransfer.files;
           if (files.length) {
@@ -378,14 +363,16 @@ function App() {
       >
         {isProcessing ? (
           <>
-            <div className="upload-icon spinning">&#8635;</div>
+            <div className="text-4xl leading-none mb-2 text-brand animate-spin-slow">
+              &#8635;
+            </div>
             <div>Processing PDF...</div>
           </>
         ) : (
           <>
-            <div className="upload-icon">+</div>
+            <div className="text-4xl leading-none mb-2 text-brand">+</div>
             <div>Click or drag files here to upload</div>
-            <div className="upload-hint">
+            <div className="text-xs text-gray-500 mt-1">
               Supports PNG, JPG, WebP, PDF, etc.
             </div>
           </>
@@ -402,28 +389,35 @@ function App() {
 
       {/* Image list */}
       {images.length > 0 && (
-        <div className="image-list">
+        <div className="mt-6 flex flex-col gap-2">
           {images.map((item, index) => (
             <div
               key={item.id}
-              className={`image-item ${dragOverIndex === index ? "drag-over" : ""}`}
+              className={`flex items-center gap-3 px-3 py-2 border rounded-lg cursor-grab active:cursor-grabbing transition-colors
+                ${dragOverIndex === index ? "border-brand bg-brand/10" : "border-border-dark dark:border-border-dark light:border-border-light"}`}
               draggable
               onDragStart={() => handleDragStart(index)}
               onDragOver={(e) => handleDragOver(e, index)}
               onDrop={() => handleDrop(index)}
               onDragEnd={handleDragEnd}
             >
-              <span className="image-index">{index + 1}</span>
-              <img src={item.url} alt={item.label} className="thumbnail" />
-              <div className="image-info">
-                <div className="image-name">{item.label}</div>
-                <div className="image-meta">
+              <span className="text-xs text-gray-500 min-w-6 text-center">
+                {index + 1}
+              </span>
+              <img
+                src={item.url}
+                alt={item.label}
+                className="w-14 h-14 object-cover rounded-md shrink-0"
+              />
+              <div className="flex-1 min-w-0">
+                <div className="text-sm truncate">{item.label}</div>
+                <div className="text-xs text-gray-400 mt-0.5">
                   {item.width} x {item.height} &middot;{" "}
                   {formatBytes(item.file.size)}
                 </div>
               </div>
               <button
-                className="remove-btn"
+                className="bg-transparent border-none text-xl text-gray-400 cursor-pointer px-2 py-1 leading-none rounded hover:text-remove hover:bg-remove/10"
                 onClick={() => removeImage(item.id)}
                 title="Remove"
               >
@@ -436,13 +430,14 @@ function App() {
 
       {/* Controls */}
       {images.length > 0 && (
-        <div className="controls">
+        <div className="mt-6 p-5 border border-border-dark dark:border-border-dark rounded-xl flex flex-col gap-5">
           {/* Format selector */}
-          <div className="control-group">
-            <label className="control-label">Output Format</label>
-            <div className="format-selector">
+          <div className="flex flex-col gap-2">
+            <label className="text-sm font-medium">Output Format</label>
+            <div className="flex gap-2">
               <button
-                className={`format-btn ${format === "jpeg" ? "active" : ""}`}
+                className={`flex-1 py-2 px-4 border rounded-lg bg-transparent text-inherit cursor-pointer text-sm transition-all
+                  ${format === "jpeg" ? "border-brand bg-brand/15 text-brand font-semibold" : "border-gray-600 hover:border-gray-400"}`}
                 onClick={() => {
                   setFormat("jpeg");
                   setMergedUrl(null);
@@ -451,7 +446,8 @@ function App() {
                 JPG
               </button>
               <button
-                className={`format-btn ${format === "png" ? "active" : ""}`}
+                className={`flex-1 py-2 px-4 border rounded-lg bg-transparent text-inherit cursor-pointer text-sm transition-all
+                  ${format === "png" ? "border-brand bg-brand/15 text-brand font-semibold" : "border-gray-600 hover:border-gray-400"}`}
                 onClick={() => {
                   setFormat("png");
                   setMergedUrl(null);
@@ -464,10 +460,12 @@ function App() {
 
           {/* Quality slider - only for JPEG */}
           {format === "jpeg" && (
-            <div className="control-group">
-              <label className="control-label">
+            <div className="flex flex-col gap-2">
+              <label className="text-sm font-medium">
                 Quality:{" "}
-                <span className="quality-value">{Math.round(quality * 100)}%</span>
+                <span className="text-brand font-semibold">
+                  {Math.round(quality * 100)}%
+                </span>
               </label>
               <input
                 type="range"
@@ -479,9 +477,9 @@ function App() {
                   setQuality(parseFloat(e.target.value));
                   setMergedUrl(null);
                 }}
-                className="quality-slider"
+                className="w-full h-1.5 accent-brand"
               />
-              <div className="slider-labels">
+              <div className="flex justify-between text-[0.7rem] text-gray-500">
                 <span>Smaller file</span>
                 <span>Higher quality</span>
               </div>
@@ -489,14 +487,14 @@ function App() {
           )}
 
           <button
-            className="merge-btn"
+            className="py-3 px-6 text-base font-semibold bg-brand text-white border-none rounded-lg cursor-pointer transition-colors hover:bg-brand-hover disabled:opacity-60 disabled:cursor-not-allowed"
             onClick={mergeImages}
             disabled={isMerging}
           >
             {isMerging ? "Merging..." : "Merge Images"}
           </button>
           <button
-            className="export-pdf-btn"
+            className="py-3 px-6 text-base font-semibold bg-danger text-white border-none rounded-lg cursor-pointer transition-colors hover:bg-danger-hover disabled:opacity-60 disabled:cursor-not-allowed"
             onClick={exportAsPdf}
             disabled={isExporting}
           >
@@ -507,13 +505,22 @@ function App() {
 
       {/* Result */}
       {mergedUrl && (
-        <div className="result">
-          <div className="result-header">
-            <h2>Result</h2>
-            <span className="result-size">{formatBytes(mergedSize)}</span>
+        <div className="mt-8 border border-border-dark dark:border-border-dark rounded-xl p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="m-0 text-xl font-semibold">Result</h2>
+            <span className="text-sm text-gray-400 bg-white/5 px-3 py-1 rounded-full">
+              {formatBytes(mergedSize)}
+            </span>
           </div>
-          <img src={mergedUrl} alt="Merged result" className="result-image" />
-          <button className="download-btn" onClick={downloadImage}>
+          <img
+            src={mergedUrl}
+            alt="Merged result"
+            className="w-full rounded-lg border border-[#2a2a2a]"
+          />
+          <button
+            className="mt-4 w-full py-3 text-base font-semibold bg-success text-white border-none rounded-lg cursor-pointer transition-colors hover:bg-success-hover"
+            onClick={downloadImage}
+          >
             Download {format === "jpeg" ? "JPG" : "PNG"}
           </button>
         </div>
